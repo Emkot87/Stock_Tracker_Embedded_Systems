@@ -105,13 +105,12 @@ int queueFull = 0;
 
 double minuteDelay = 0;
 
-
+static signed char packetReciever(struct lejp_ctx *ctx, char reason);
 void initialCandleStick(struct candleStick *candleStick ,int size, int candleSticksIndexLoc);
 void printInfoToFile(int index, double time);
 void *calculateCandles();
 void *consumer();
 void calculateFifteen(int candleIndex, double time);
-
 
 
 static void INT_HANDLER(int signo) {
@@ -149,83 +148,6 @@ const char *symbols[] = {"APPL\0", "AMZN\0", "BINANCE:BTCUSDT\0", "IC MARKETS:1\
 
 pthread_mutex_t fileMutex = PTHREAD_MUTEX_INITIALIZER;
 
-static signed char cb(struct lejp_ctx *ctx, char reason)
-{
-  
-    static int counter = 0;
-    
-    if (reason & LEJP_FLAG_CB_IS_VALUE && (ctx->path_match > 0))
-    {
-
-        switch (counter)
-        {
-
-        case 0:
-            tradingInfos[tradingInfoIndex].price = atof(ctx->buf);
-            counter++;
-            break;
-
-        case 1:
-            strcpy(tradingInfos[tradingInfoIndex].symbol ,ctx->buf);
-            counter++;
-            break;
-
-        case 2:
-            tradingInfos[tradingInfoIndex].timestamp = strtoul(ctx->buf,NULL,10);
-            counter++;
-            break;
-
-        case 3:
-            tradingInfos[tradingInfoIndex].volume = atof(ctx->buf);
-
-            pthread_mutex_lock(fifo->mut);
-
-            while (fifo->full) {
-                queueFull++;
-                pthread_cond_wait (fifo->notFull, fifo->mut);
-            }
-            
-            
-
-            gettimeofday (&current_time, NULL);
-
-            timerForTrades = (double)(current_time.tv_usec/1.0e6 + current_time.tv_sec);
-
-            workFunc workpoint;
-            workpoint.work = &(printInfoToFile);
-            workpoint.arg = tradingInfoIndex;
-            workpoint.timer = timerForTrades;
-
-
-            queueAdd (fifo, workpoint);
-
-            pthread_mutex_unlock(fifo->mut);
-
-            pthread_cond_signal(fifo->notEmpty);
-
-            tradingInfoIndex = (tradingInfoIndex+1)%10000;
-
-            counter = 0;
-
-            break;
-
-        default:
-            
-            break;
-            
-        }
-
-    } 
-    
-    if (reason == LEJPCB_COMPLETE)
-    {   
-        struct timeval tv;
-    
-        gettimeofday(&tv, NULL);
-        
-    }  
-    
-}
 
 struct lejp_ctx ctx;
 
@@ -271,7 +193,7 @@ static int ws_service_callback(
         case LWS_CALLBACK_CLIENT_RECEIVE:
             msg = (char *)in;
 
-            lejp_construct(&ctx, cb, NULL, tok, LWS_ARRAY_SIZE(tok));   // of parser
+            lejp_construct(&ctx, packetReciever, NULL, tok, LWS_ARRAY_SIZE(tok));   // of parser
             int m = lejp_parse(&ctx, (uint8_t *)msg, strlen(msg));
             if (m < 0 && m != LEJP_CONTINUE)
             {
@@ -424,6 +346,83 @@ int main(void)
     lws_context_destroy(context);
 
     return 0;
+}
+static signed char packetReciever(struct lejp_ctx *ctx, char reason)
+{
+  
+    static int counter = 0;
+    
+    if (reason & LEJP_FLAG_CB_IS_VALUE && (ctx->path_match > 0))
+    {
+
+        switch (counter)
+        {
+
+        case 0:
+            tradingInfos[tradingInfoIndex].price = atof(ctx->buf);
+            counter++;
+            break;
+
+        case 1:
+            strcpy(tradingInfos[tradingInfoIndex].symbol ,ctx->buf);
+            counter++;
+            break;
+
+        case 2:
+            tradingInfos[tradingInfoIndex].timestamp = strtoul(ctx->buf,NULL,10);
+            counter++;
+            break;
+
+        case 3:
+            tradingInfos[tradingInfoIndex].volume = atof(ctx->buf);
+
+            pthread_mutex_lock(fifo->mut);
+
+            while (fifo->full) {
+                queueFull++;
+                pthread_cond_wait (fifo->notFull, fifo->mut);
+            }
+            
+            
+
+            gettimeofday (&current_time, NULL);
+
+            timerForTrades = (double)(current_time.tv_usec/1.0e6 + current_time.tv_sec);
+
+            workFunc workpoint;
+            workpoint.work = &(printInfoToFile);
+            workpoint.arg = tradingInfoIndex;
+            workpoint.timer = timerForTrades;
+
+
+            queueAdd (fifo, workpoint);
+
+            pthread_mutex_unlock(fifo->mut);
+
+            pthread_cond_signal(fifo->notEmpty);
+
+            tradingInfoIndex = (tradingInfoIndex+1)%10000;
+
+            counter = 0;
+
+            break;
+
+        default:
+            
+            break;
+            
+        }
+
+    } 
+    
+    if (reason == LEJPCB_COMPLETE)
+    {   
+        struct timeval tv;
+    
+        gettimeofday(&tv, NULL);
+        
+    }  
+    
 }
 
 void initialCandleStick(struct candleStick *candleStick ,int size, int candleSticksIndexLoc)

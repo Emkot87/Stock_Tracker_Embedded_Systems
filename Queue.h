@@ -3,7 +3,7 @@
 
 int foo(int x);  /* An example function declaration */
 
-#define QUEUESIZE 50
+#define QUEUESIZE 60
 #include <pthread.h>
 #include <sys/time.h>
 

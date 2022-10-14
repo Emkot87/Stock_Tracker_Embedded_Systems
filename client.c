@@ -71,8 +71,8 @@ struct candleStick
 {
     float initialPrice;
     float finalPrice;
-    float maxPrice;
     float minPrice;
+    float maxPrice;
     float totalVolume;
     unsigned int transactions;
     float volumePrice;
@@ -81,7 +81,7 @@ struct candleStick
     float fifteenMean;
 };
 
-struct tradingInfo tradingInfos[10000]; //buffer
+struct tradingInfo tradingInfos[10000];
 
 struct candleStick candleSticks[4 * 15];
 
@@ -89,9 +89,9 @@ queue *fifo;
 
 pthread_mutex_t *MutA;
 
-unsigned tradingInfoIndex = 0;
+unsigned tradeInfoIndex = 0;
 
-pthread_t con[10];
+pthread_t con[8];
 
 unsigned int candleSticksIndex = 0;
 
@@ -106,9 +106,9 @@ int queueFull = 0;
 double minuteDelay = 0;
 
 static signed char packetReciever(struct lejp_ctx *ctx, char reason);
-void initialCandleStick(struct candleStick *candleStick ,int size, int candleSticksIndexLoc);
+void initializeCandlestick(struct candleStick *candleStick ,int size, int candleSticksIndexLoc);
 void printInfoToFile(int index, double time);
-void *calculateCandles();
+void *calculateCandlesticks();
 void *consumer();
 void calculateFifteen(int candleIndex, double time);
 
@@ -162,16 +162,16 @@ static int ws_service_callback(
 
     switch (reason) {
 
+        case LWS_CALLBACK_CLIENT_CLOSED:
+            printf("Timed out\n");
+            destroy_flag = 1;
+            lejp_destruct(&ctx);
+            break;
+
         case LWS_CALLBACK_CLIENT_ESTABLISHED:
             printf(KYEL"[Main Service] Connect with server success.\n"RESET);
-            pthread_t PrintToFileThread;
+
             connection_flag = 1;
-
-            pthread_create(&PrintToFileThread, NULL, calculateCandles, NULL);
-
-            for(int i = 0 ; i < 8 ; i++){
-                pthread_create(&con[i], NULL, consumer, NULL);
-            } 
 
             lws_callback_on_writable(wsi);
 	        
@@ -273,8 +273,18 @@ int main(void)
     pthread_mutex_init(MutA,NULL);
     fifo = queueInit ();
 
-    initialCandleStick(candleSticks,4,candleSticksIndex);
+    initializeCandlestick(candleSticks,4,candleSticksIndex);
 
+    pthread_t PrintToFileThread;
+            
+
+    pthread_create(&PrintToFileThread, NULL, calculateCandlesticks, NULL);
+
+    for(int i = 0 ; i < 8 ; i++){
+        pthread_create(&con[i], NULL, consumer, NULL);
+    } 
+
+    while(1){
 
     struct lws_context *context = NULL;
     struct lws_context_creation_info info;
@@ -341,11 +351,15 @@ int main(void)
     while(!destroy_flag)
     {
         lws_service(context, 50);
+        
     }
 
     lws_context_destroy(context);
 
-    return 0;
+    destroy_flag = 0;
+
+    //return 0;
+    }
 }
 static signed char packetReciever(struct lejp_ctx *ctx, char reason)
 {
@@ -359,22 +373,22 @@ static signed char packetReciever(struct lejp_ctx *ctx, char reason)
         {
 
         case 0:
-            tradingInfos[tradingInfoIndex].price = atof(ctx->buf);
+            tradingInfos[tradeInfoIndex].price = atof(ctx->buf);
             counter++;
             break;
 
         case 1:
-            strcpy(tradingInfos[tradingInfoIndex].symbol ,ctx->buf);
+            strcpy(tradingInfos[tradeInfoIndex].symbol ,ctx->buf);
             counter++;
             break;
 
         case 2:
-            tradingInfos[tradingInfoIndex].timestamp = strtoul(ctx->buf,NULL,10);
+            tradingInfos[tradeInfoIndex].timestamp = strtoul(ctx->buf,NULL,10);
             counter++;
             break;
 
         case 3:
-            tradingInfos[tradingInfoIndex].volume = atof(ctx->buf);
+            tradingInfos[tradeInfoIndex].volume = atof(ctx->buf);
 
             pthread_mutex_lock(fifo->mut);
 
@@ -383,15 +397,14 @@ static signed char packetReciever(struct lejp_ctx *ctx, char reason)
                 pthread_cond_wait (fifo->notFull, fifo->mut);
             }
             
-            
-
+        
             gettimeofday (&current_time, NULL);
 
             timerForTrades = (double)(current_time.tv_usec/1.0e6 + current_time.tv_sec);
 
             workFunc workpoint;
             workpoint.work = &(printInfoToFile);
-            workpoint.arg = tradingInfoIndex;
+            workpoint.arg = tradeInfoIndex;
             workpoint.timer = timerForTrades;
 
 
@@ -401,7 +414,7 @@ static signed char packetReciever(struct lejp_ctx *ctx, char reason)
 
             pthread_cond_signal(fifo->notEmpty);
 
-            tradingInfoIndex = (tradingInfoIndex+1)%10000;
+            tradeInfoIndex = (tradeInfoIndex+1)%10000;
 
             counter = 0;
 
@@ -425,7 +438,7 @@ static signed char packetReciever(struct lejp_ctx *ctx, char reason)
     
 }
 
-void initialCandleStick(struct candleStick *candleStick ,int size, int candleSticksIndexLoc)
+void initializeCandlestick(struct candleStick *candleStick ,int size, int candleSticksIndexLoc)
 {
     for(int i = 0 ; i < size ; i++ ){
         candleStick[candleSticksIndexLoc + i*15].initialPrice = 0;
@@ -463,13 +476,9 @@ void printInfoToFile(int index, double time)
 
     pthread_mutex_unlock (MutA);
 
-    // fptr = fopen("./Results/tradeDelay.txt","a");
-    // fprintf(fptr,"%lf\n",(double)(printTime.tv_usec/1.0e6 + printTime.tv_sec) - time);
-    // fclose(fptr);
-
 }
 
-void *calculateCandles(){
+void *calculateCandlesticks(){
 
     struct tradingInfo data;
     static int backIndex = 0;
@@ -487,7 +496,7 @@ void *calculateCandles(){
         gettimeofday(&cur_time, NULL);
         timer = (double)(cur_time.tv_usec/1.0e6 + cur_time.tv_sec);
 
-        int index = tradingInfoIndex;
+        int index = tradeInfoIndex;
         
         while(backIndex != index){
             data = tradingInfos[backIndex];
@@ -572,7 +581,7 @@ void *calculateCandles(){
             fifteenPassed = 1;
 
         candleSticksIndex = (candleSticksIndex+1)%15;
-        initialCandleStick(candleSticks, 4, candleSticksIndex);
+        initializeCandlestick(candleSticks, 4, candleSticksIndex);
 
         printf(" queueFulls until now: %d\n",queueFull);
         sleep(50);

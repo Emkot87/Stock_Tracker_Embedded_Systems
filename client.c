@@ -165,7 +165,6 @@ static int ws_service_callback(
         case LWS_CALLBACK_CLIENT_CLOSED:
             printf("Timed out\n");
             destroy_flag = 1;
-            lejp_destruct(&ctx);
             break;
 
         case LWS_CALLBACK_CLIENT_ESTABLISHED:
